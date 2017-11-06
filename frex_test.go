@@ -1,29 +1,56 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"strings"
+)
 
-func ParseArgsValidationTest(t *testing.T) {
+type argsSlice []string
+
+func (s argsSlice) String() string {
+	if s == nil {
+		return "[<<nil>>]"
+	}
+
+	res := "["
+	last := len(s) - 1
+	for i, v := range s {
+		res += "\"" + v + "\""
+		if i != last {
+			res += ", "
+		}
+	}
+
+	return res + "]"
+}
+
+func TestParseArgsValidation(t *testing.T) {
 	var testCases = []struct {
-		args   []string
+		args   argsSlice
 		errMsg string
 	}{
-		{nil, "nil"}
+		{nil, "nil"},
 
-		{{},         "Not enought arguments"},
-		{{"a"},      "Not enought arguments"},
-		{{"a", "a"}, "Not enought arguments"},
+		{argsSlice{},         "Not enought arguments"},
+		{argsSlice{"a"},      "Not enought arguments"},
+		{argsSlice{"a", "a"}, "Not enought arguments"},
 
-		{{"(\d", "a", "a"}, "error"},
+		{argsSlice{"(\\d", "a", "a"}, "error"},
 
 		// not safe test, because fakeDir and fakeFile can exist
-		{{"\d", "a", "fakeDir\fakeFile"}, "not found"},
+		{argsSlice{"\\d", "a", "fakeDir\\fakeFile"}, "not found"},
 	}
 
 	for _, tc := range testCases {
-		args, err := parseArgs(tc.args)
+		_, err := parseArgs(tc.args)
 
-		if got != tc.want {
-			t.Errorf("FindChar(%q) == %q, want %q", tc.s, got, tc.want)
+		if err == nil {
+			t.Errorf("parseArgs(%v) returned nil error, expected error with: %q",
+				tc.args, tc.errMsg)
+		} else if false == strings.Contains(err.Error(), tc.errMsg) {
+			t.Errorf("parseArgs(%v) returnet wrong error message\n" +
+				"Got: %s\nExpected to contain:%s\n",
+				tc.args, err, tc.errMsg)
 		}
 	}
 }
