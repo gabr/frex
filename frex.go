@@ -4,12 +4,20 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 )
 
+// TODO: Base order on the operating system
+var newLineSequences []string = []string{
+	"\x0D\x0A", // windows
+	"\x0A",     // linux
+	"\x0D",     // mac
+}
+
 const (
-	fileBufferSize = int(1048576/4) // 0.25 MB
+	fileBufferSize    = 255
 	minArgumentsCount = 3
-	help = `Error: %s
+	help              = `Error: %s
 
 frex: File REgeX replacement
 
@@ -59,10 +67,11 @@ func parseArgs(userArgs []string) (arguments, error) {
 		// ignore duplicates
 		_, added := addedFilePaths[filePath]
 		if added {
-			fmt.Fprintf(os.Stderr, "Ignoring duplicated path: '%s'", filePath)
+			fmt.Fprintf(os.Stderr, "Ignoring duplicated path: '%s'\n", filePath)
 			continue
 		}
 
+		// TODO: Accept wildchards
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			return args, fmt.Errorf("File not found: %q", filePath)
 		}
@@ -74,8 +83,47 @@ func parseArgs(userArgs []string) (arguments, error) {
 	return args, nil
 }
 
+// Finds out closest new line pos of windows/linux/mac new lines sequences.
+// Returns both the position and the new line sequence.
+//
+// Errors:
+//   If new line is not found returns -1
+//   If the given offset if greater then given string length it will return -2
+//   If the given offset is negative then it will return -3
+func findOutNewLinePos(s string, offset int) (pos int, seq string) {
+	if offset < 0 {
+		return -3, ""
+	}
+
+	if offset > len(s) {
+		return -2, ""
+	}
+
+	s = s[offset:]
+
+	minPos := -1
+	minPosSeq := ""
+	for _, seq := range newLineSequences {
+		pos := strings.Index(s, seq)
+		if pos != -1 {
+			if minPos == -1 {
+				minPos = pos
+				minPosSeq = seq
+			} else if pos < minPos {
+				minPos = pos
+				minPosSeq = seq
+			}
+		}
+	}
+
+	return minPos, minPosSeq
+}
+
 func replaceInFile(regex *regexp.Regexp, replace string, path string, end chan bool) {
-	defer (func () { end <- true })()	
+	defer (func() { end <- true })()
+
+	fmt.Printf("DEBUG (%q): Started\n", path)
+	defer (func() { fmt.Printf("DEBUG (%q): Ended\n", path) })()
 
 	file, err := os.Open(path)
 	if err != nil {
@@ -84,16 +132,18 @@ func replaceInFile(regex *regexp.Regexp, replace string, path string, end chan b
 	}
 	defer file.Close()
 
-	// windows new line: 0D 0A
-	// linux   new line: 0A
-	// mac     new line: 0D or 0A
-
-	buffer := make([]byte, 0, fileBufferSize)
+	buffer := make([]byte, fileBufferSize, fileBufferSize)
 	var fileOff int64 = 0
 	for {
+		fmt.Printf("DEBUG (%q): In loop\n", path)
+
 		n, err := file.ReadAt(buffer, fileOff)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error while reading file %q: %s",
+		fmt.Printf("DEBUG (%q): n: %d/%d Buffer: %v\n", path, n,
+			fileBufferSize, buffer)
+
+		// the n == 0 is to not catch EOF until readed all bytes till the end
+		if err != nil && n == 0 {
+			fmt.Fprintf(os.Stderr, "Error while reading file '%s': %s\n",
 				path, err)
 			return
 		}
@@ -111,7 +161,10 @@ func replaceInFile(regex *regexp.Regexp, replace string, path string, end chan b
 		// 5. Repeat until read less then buffer
 
 		if n < fileBufferSize {
-			if n == 0 { break }
+			fmt.Printf("DEBUG (%q): In condition %d < %d\n", path, n, fileBufferSize)
+			if n == 0 {
+				break
+			}
 
 			// TODO: Check the rest of the buffer
 		}
