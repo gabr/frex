@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	fileBufferSize = 1048576 // 1MB
+	fileBufferSize = int(1048576/4) // 0.25 MB
 	minArgumentsCount = 3
 	help = `Error: %s
 
@@ -54,28 +54,32 @@ func parseArgs(userArgs []string) (arguments, error) {
 
 	args.replace = userArgs[1]
 
+	addedFilePaths := make(map[string]bool)
 	for _, filePath := range userArgs[2:] {
-		// TODO: Remove duplicates
+		// ignore duplicates
+		_, added := addedFilePaths[filePath]
+		if added {
+			fmt.Fprintf(os.Stderr, "Ignoring duplicated path: '%s'", filePath)
+			continue
+		}
+
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			return args, fmt.Errorf("File not found: %q", filePath)
 		}
-		append(args.filePaths
+
+		args.filesPaths = append(args.filesPaths, filePath)
+		addedFilePaths[filePath] = true
 	}
 
 	return args, nil
 }
 
-func replaceInFile(regex *regexp.Regexp,
-                   replace string,
-                   filePath string,
-                   end chan bool)
-{
+func replaceInFile(regex *regexp.Regexp, replace string, path string, end chan bool) {
 	defer (func () { end <- true })()	
 
-	file, err := os.Open(filePath)
+	file, err := os.Open(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error while opening file %q: %s",
-			filePath, err)
+		fmt.Fprintf(os.Stderr, "Error while opening file %q: %s", path, err)
 		return
 	}
 	defer file.Close()
@@ -85,18 +89,26 @@ func replaceInFile(regex *regexp.Regexp,
 	// mac     new line: 0D or 0A
 
 	buffer := make([]byte, 0, fileBufferSize)
-	fileOff := 0
+	var fileOff int64 = 0
 	for {
 		n, err := file.ReadAt(buffer, fileOff)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while reading file %q: %s",
-				filePath, err)
+				path, err)
 			return
 		}
 
-		fileOff += n
+		fileOff += int64(n) // TODO: Only if no pattern was found in line
 
-		// TODO: 
+		// TODO: Plan:
+		// 1. Read buffer
+		// 2. Try to find new line sequence
+		//    If found ambiguity write error and end
+		// 3. In each line slice check regex and replace if required
+		// 4. If replace is required write only this change to file
+		//    and continue reading buffer just after the last rune of
+		//    the change.
+		// 5. Repeat until read less then buffer
 
 		if n < fileBufferSize {
 			if n == 0 { break }
